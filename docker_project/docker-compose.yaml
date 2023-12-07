@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  yolo:
+    build:
+      context: ./yolo5
+    networks:
+      - custom_network
+    ports:
+      - "8080:8080"  # Map container's port 8080 to host's port 8080
+    volumes:
+      - C:\Users\Lenovo\PycharmProjects\dockerproject\docker_project\cred\credentials:/root/.aws/credentials
+
+
+  bot:
+    build:
+      context: ./polybot
+    networks:
+      - custom_network
+    ports:
+      - "8443:8443"  # Map container's port 6379 to host's port 6379
+    volumes:
+      - C:\Users\Lenovo\PycharmProjects\dockerproject\docker_project\cred\credentials:/root/.aws/credentials
+
+
+
+  mongo1:
+    image: mongo
+    networks:
+      - custom_network
+
+    command: [ "mongod", "--replSet", "rs0", "--port", "27017", "--bind_ip_all" ]
+
+
+  mongo2:
+      image: mongo
+      networks:
+        - custom_network
+
+      command: [ "mongod", "--replSet", "rs0", "--port", "27018", "--bind_ip_all"]
+
+  mongo3:
+      image: mongo
+      networks:
+        custom_network:
+
+      command: [ "mongod", "--replSet", "rs0", "--port", "27019", "--bind_ip_all"]
+
+
+networks:
+  custom_network:
+     driver: bridge
+
+

@@ -6,13 +6,26 @@ import uuid
 import yaml
 from loguru import logger
 import os
+import boto3
+from pymongo import MongoClient
+import json
 
-images_bucket = os.environ['BUCKET_NAME']
+
+
+os.environ['BUCKET_NAME'] = 'dockerprojectbucket'
 
 with open("data/coco128.yaml", "r") as stream:
     names = yaml.safe_load(stream)['names']
 
 app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return 'Hello'
+@app.route('/status')
+def status():
+    return 'OK'
+
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -26,9 +39,24 @@ def predict():
 
     # TODO download img_name from S3, store the local image path in original_img_path
     #  The bucket name should be provided as an env var BUCKET_NAME.
-    original_img_path = ...
+    directory_path = '/yolo'
+    # Use os.makedirs to create the directory and its parent directories if they don't exist
+    os.makedirs(directory_path, exist_ok=True)
 
-    logger.info(f'prediction: {prediction_id}/{original_img_path}. Download img completed')
+    original_img_path = f'{prediction_id}_downloaded_img.png'
+
+
+    s3_resource = boto3.resource('s3')
+
+    # Download image from S3 bucket
+    s3 = boto3.client(
+        's3'
+    )
+    s3.download_file(os.environ['BUCKET_NAME'], img_name, original_img_path)
+
+    logger.info(f'Prediction ID: {prediction_id}. Image downloaded from S3.')
+
+
 
     # Predicts the objects in the image
     run(
@@ -46,7 +74,11 @@ def predict():
     # The predicted image typically includes bounding boxes drawn around the detected objects, along with class labels and possibly confidence scores.
     predicted_img_path = Path(f'static/data/{prediction_id}/{original_img_path}')
 
+
     # TODO Uploads the predicted image (predicted_img_path) to S3 (be careful not to override the original image).
+
+    s3.upload_file(predicted_img_path, os.environ['BUCKET_NAME'], f'imagesafterprediction/predicted_{img_name}')
+    logger.info(f'Prediction ID: {prediction_id}. Predicted image uploaded to S3.')
 
     # Parse prediction labels and create a summary
     pred_summary_path = Path(f'static/data/{prediction_id}/labels/{original_img_path.split(".")[0]}.txt')
@@ -66,13 +98,33 @@ def predict():
 
         prediction_summary = {
             'prediction_id': prediction_id,
-            'original_img_path': original_img_path,
-            'predicted_img_path': predicted_img_path,
+            'original_img_path': str(original_img_path),
+            'predicted_img_path': str(predicted_img_path),
             'labels': labels,
             'time': time.time()
         }
 
         # TODO store the prediction_summary in MongoDB
+        mongo_client = MongoClient('http://mongo1:27017/')
+        db = mongo_client['prediction_db']
+        collection = db['prediction_collection']
+
+        def json_serial(obj):
+            """JSON serializer for objects not serializable by default json code"""
+
+            if isinstance(obj, (datetime.datetime, datetime.date)):
+                return obj.isoformat()
+            if isinstance(obj, ObjectId):
+                return str(obj)
+            raise TypeError("Type %s not serializable" % type(obj))
+
+
+        json_data = json.dumps(prediction_summary, default=json_serial)
+        parsed_data = json.loads(json_data)
+
+        collection.insert_one(parsed_data)
+
+        logger.info('data is inserted to mongoDB')
 
         return prediction_summary
     else:
@@ -80,4 +132,6 @@ def predict():
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8081)
+    app.run(debug=True, port=8080, host='0.0.0.0')
+
+
